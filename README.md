@@ -55,7 +55,7 @@ python plot_results.py     # creates data/equity_curve.png (a results chart)
    compares that strategy's return, risk, and biggest losing streak against
    simply buying and holding everything.
 
-## Being honest about the demo results
+## Limitation about the demo results
 
 When tested on made-up (fake) price data, the model correctly finds almost
 no real pattern — which is exactly what should happen, since fake random
