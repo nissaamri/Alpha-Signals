@@ -1,98 +1,100 @@
-# Alpha Signals — Multi-Market Forecasting Pipeline
+# Alpha Signals — Stock Prediction & Trading Test Pipeline
 
-A daily-frequency, cross-market forecasting pipeline that pulls equities
-data from three exchanges (NYSE, LSE, Bursa Malaysia), engineers momentum /
-volatility / macro-correlation features, trains a LightGBM model to predict
-5-day forward returns, and backtests a long-short strategy against an
-equal-weight buy-and-hold benchmark — with realistic transaction costs.
+A project that looks at stock prices from three different stock markets — New
+York, London, and Bursa Malaysia — tries to predict where prices are heading
+in the next 5 days, and then tests whether that prediction could actually
+make money if you traded on it (accounting for real trading fees).
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
 
-# Demo mode — synthetic data, runs instantly, no internet needed.
-# Good for checking the pipeline works before pointing it at real markets.
+# Demo mode — uses made-up (fake) price data, runs instantly, no internet needed.
+# Good for checking everything works before trying it on real markets.
 python main.py --demo
 
-# Real mode — pulls live data from Yahoo Finance. Needs internet.
+# Real mode — pulls real, live data from Yahoo Finance. Needs internet.
 python main.py
 ```
 
-Each stage can also be run individually, in order:
+Each step can also be run on its own, in order:
 
 ```bash
 python data_pipeline.py --demo
 python features.py
 python model.py
 python backtest.py
-python plot_results.py     # writes data/equity_curve.png
+python plot_results.py     # creates data/equity_curve.png (a results chart)
 ```
 
-## What's actually happening at each stage
+## What each file actually does
 
-1. **`data_pipeline.py`** — pulls 10 years of daily OHLCV for 30 large-cap
-   tickers across three markets (10 NYSE, 10 LSE, 10 Bursa Malaysia), plus
-   each market's benchmark index. `fetch_demo()` generates synthetic data
-   via geometric Brownian motion so you can test everything offline;
-   `fetch_real()` swaps in actual Yahoo Finance data.
+1. **`data_pipeline.py`** — Collects 10 years of daily stock prices for 30
+   well-known companies (10 from New York, 10 from London, 10 from Bursa
+   Malaysia), plus each market's overall index for comparison. It can either
+   make up fake price data to test with (`fetch_demo()`), or pull real prices
+   from Yahoo Finance (`fetch_real()`).
 
-2. **`features.py`** — for each ticker, computes 5-day and 20-day momentum,
-   20-day realized volatility, 14-day RSI, and rolling 60-day correlation
-   and beta against that ticker's own market index (the "macro" features).
-   The prediction target is the forward 5-day return.
+2. **`features.py`** — Turns raw prices into useful signals for each stock:
+   how much it's moved recently (5-day and 20-day momentum), how bouncy it's
+   been (volatility), a popular trading indicator called RSI, and how closely
+   it moves with its own market's overall index. The goal is predicting the
+   stock's return over the next 5 days.
 
-3. **`model.py`** — trains a LightGBM regressor on a **time-based**
-   train/test split (never trains on the future) and reports MAE and
-   information coefficient (IC) — the correlation between predicted and
-   realized returns, which is the standard way quant researchers judge
-   whether a signal has any real predictive power.
+3. **`model.py`** — Trains a machine learning model (LightGBM) to make that
+   prediction. It's tested the honest way — trained only on past data,
+   tested only on data that comes *after* that, so it can never "cheat" by
+   peeking into the future. Two numbers measure how good it is: average
+   error, and how well predictions actually line up with what really
+   happened (called the Information Coefficient).
 
-4. **`backtest.py`** — every 5 trading days, ranks all tickers by predicted
-   return, goes long the top quintile and short the bottom quintile
-   (equal-weighted, dollar-neutral), and charges 5 bps of transaction cost
-   per unit of turnover. Reports annualized return, volatility, Sharpe
-   ratio, and max drawdown for both the strategy and the benchmark.
+4. **`backtest.py`** — Simulates actually trading on the model's predictions:
+   every 5 days, bet on the stocks predicted to do best, bet against the
+   ones predicted to do worst, and subtract realistic trading fees. Then
+   compares that strategy's return, risk, and biggest losing streak against
+   simply buying and holding everything.
 
-## Reading the demo-mode results honestly
+## Being honest about the demo results
 
-On synthetic random-walk data, the model correctly finds almost no signal
-(IC ≈ 0.04, close to zero — there's no real pattern to find in fake data),
-and the strategy **underperforms** the benchmark once transaction costs are
-subtracted. That's the expected, correct outcome — a good sign the
-pipeline isn't secretly leaking future information into the model. Real
-market data may show a genuine signal, a weak one, or none at all — write
-up whatever you actually find. A well-reasoned negative result ("the
-signal decayed too fast on liquid markets to survive costs") is a more
-credible portfolio piece than a suspiciously good backtest, and it's the
-kind of finding real quant researchers report all the time.
+When tested on made-up (fake) price data, the model correctly finds almost
+no real pattern — which is exactly what should happen, since fake random
+data has no real pattern to find. And once trading fees are subtracted, the
+strategy actually does slightly worse than just buying and holding. That's
+a good sign, not a bad one — it means the model isn't secretly cheating by
+looking at "future" information it shouldn't have access to.
 
-## Known simplifications (worth naming explicitly in interviews)
+Real market data might show a real pattern, a weak one, or none at all —
+and that's fine either way. An honest, well-explained "this didn't quite
+work and here's why" is a more trustworthy result than a suspiciously
+perfect one, and it's the kind of finding real trading researchers report
+all the time too.
 
-- **No currency conversion.** Returns are used directly in local currency;
-  a real cross-market strategy would need to either hedge FX or explicitly
-  account for it.
-- **No survivorship-bias control.** The ticker list is fixed and modern —
-  a rigorous backtest would use a point-in-time index constituent list.
-- **Single fixed rebalance frequency** (5 days) rather than something
-  tuned or adaptive.
-- **Spark/EMR vs. pandas.** This scales to pandas comfortably at ~30
-  tickers x 10 years (~85k rows). The original brief specified Spark on
-  AWS EMR — that becomes worth it once you're at hundreds of tickers or
-  tick-level (not daily) data. `data_pipeline.py`'s structure — fetch per
-  market, tag with market/index, concatenate — maps directly onto a
-  PySpark job if you want to demonstrate that version too: swap the
-  pandas `concat` for a Spark `union`, and the groupby-based feature
-  engineering in `features.py` for a Spark window function over
-  `partitionBy("ticker").orderBy("Date")`.
+## Known simplifications
+
+- **No currency conversion.** Each market's returns are used in that
+  market's own currency, without converting everything to one common
+  currency first.
+- **No adjustment for companies that no longer exist.** The list of stocks
+  used is fixed and made up of companies still around today — a fully
+  rigorous test would need the exact list of companies that existed at each
+  point in the past, including ones that later went bankrupt or got bought
+  out.
+- **One fixed trading schedule** (every 5 days) rather than something
+  fine-tuned or automatically adjusted.
+- **Runs on a regular computer, not a big-data cluster.** With about 30
+  stocks over 10 years (~85,000 rows), a normal computer handles this fine.
+  A much bigger version (hundreds of stocks, or prices updated every
+  second) would need distributed computing tools like Spark — the code is
+  structured so it could be adapted that way later if needed.
 
 ## Files
 
 ```
-data_pipeline.py     fetch + clean raw OHLCV (real or synthetic)
-features.py           momentum / volatility / macro features + target
-model.py               LightGBM training + walk-forward evaluation
-backtest.py            long-short backtest vs. buy-and-hold benchmark
-plot_results.py        equity curve chart
-main.py                 runs all four stages end to end
+data_pipeline.py     collects and cleans stock price data (real or fake/demo)
+features.py           turns prices into prediction signals
+model.py               trains the prediction model and checks its accuracy
+backtest.py            simulates trading on the predictions vs. just holding
+plot_results.py        draws the results chart
+main.py                 runs all four steps in order, start to finish
 ```
